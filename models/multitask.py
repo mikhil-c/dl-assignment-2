@@ -24,9 +24,9 @@ class MultiTaskPerceptionModel(nn.Module):
         """
         super().__init__()
         import gdown
-        gdown.download(id="<classifier.pth drive id>", output=classifier_path, quiet=False)
-        gdown.download(id="<localizer.pth drive id>", output=localizer_path, quiet=False)
-        gdown.download(id="<unet.pth drive id>", output=unet_path, quiet=False)
+        gdown.download(id="1PDK9efEtdB7DSkM1vDQi1jOIMsl9yaAq", output=classifier_path, quiet=False)
+        gdown.download(id="18Fhb6GwmyCx60hIQQ-IvaBSwMmFK67Vs", output=localizer_path, quiet=False)
+        gdown.download(id="1OW-YRdCKIzs4i7U0lNBbdSKfpKzsYCBW", output=unet_path, quiet=False)
         
         self.classifier_model = VGG11Classifier(num_classes=num_breeds, in_channels=in_channels)
         self.localizer_model = VGG11Localizer(in_channels=in_channels)
