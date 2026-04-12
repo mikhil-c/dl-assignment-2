@@ -88,8 +88,7 @@ def train_localizer(device: torch.device, train_loader: DataLoader, epochs: int 
     classifier_path = "checkpoints/classifier.pth"
     if os.path.exists(classifier_path):
         ckpt = torch.load(classifier_path, map_location=device)
-        state_dict = ckpt.get("state_dict", ckpt)
-        model.load_state_dict(state_dict, strict=False)
+        model.load_state_dict(ckpt.get("state_dict", ckpt), strict=False)
 
     for param in model.features.parameters():
         param.requires_grad = False
@@ -104,6 +103,9 @@ def train_localizer(device: torch.device, train_loader: DataLoader, epochs: int 
     print("Starting Localization Training...")
     for epoch in range(epochs):
         model.train()
+        
+        model.features.eval()
+        
         total_loss = 0.0
 
         for images, _, bboxes, _ in train_loader:
@@ -115,7 +117,7 @@ def train_localizer(device: torch.device, train_loader: DataLoader, epochs: int 
             
             loss_mse = mse_loss(outputs, bboxes)
             loss_iou = iou_loss(outputs, bboxes)
-            loss = loss_mse + loss_iou
+            loss = (0.001 * loss_mse) + loss_iou
             
             loss.backward()
             optimizer.step()
@@ -141,20 +143,21 @@ def train_segmentation(device: torch.device, train_loader: DataLoader, epochs: i
         ckpt = torch.load(classifier_path, map_location=device)
         temp_classifier.load_state_dict(ckpt.get("state_dict", ckpt))
 
-        classifier_params = list(temp_classifier.features.parameters())
+        c_modules = [m for m in temp_classifier.features.modules() if isinstance(m, (nn.Conv2d, nn.BatchNorm2d))]
+        
         unet_encoders = [model.enc1, model.enc2, model.enc3, model.enc4, model.enc5]
-        unet_params = []
+        u_modules = []
         for enc in unet_encoders:
-            unet_params.extend(list(enc.parameters()))
+            u_modules.extend([m for m in enc.modules() if isinstance(m, (nn.Conv2d, nn.BatchNorm2d))])
 
-        for c_param, u_param in zip(classifier_params, unet_params):
-            u_param.data.copy_(c_param.data)
-            u_param.requires_grad = False
+        for c_m, u_m in zip(c_modules, u_modules):
+            u_m.load_state_dict(c_m.state_dict())
+            for p in u_m.parameters():
+                p.requires_grad = False
             
-        print("Successfully transferred and frozen classifier weights to UNet encoder!")
+        print("Successfully transferred classifier weights and BN stats to UNet encoder!")
 
     criterion = nn.CrossEntropyLoss()
-    
     optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=1e-4)
 
     wandb.init(project="da6401_assignment_2", name="unet_segmentation")
@@ -162,6 +165,10 @@ def train_segmentation(device: torch.device, train_loader: DataLoader, epochs: i
     print("Starting Segmentation Training...")
     for epoch in range(epochs):
         model.train()
+        
+        for enc in [model.enc1, model.enc2, model.enc3, model.enc4, model.enc5]:
+            enc.eval()
+            
         total_loss = 0.0
         epoch_dice = 0.0
 
@@ -197,9 +204,10 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     os.makedirs("checkpoints", exist_ok=True)
 
+    # Kaggle dataset path
     dataset_root = "/kaggle/input/datasets/julinmaloof/the-oxfordiiit-pet-dataset"
     dataset = OxfordIIITPetDataset(root_dir=dataset_root, split='train')
-    train_loader = DataLoader(dataset, batch_size=16, shuffle=True)
+    train_loader = DataLoader(dataset, batch_size=16, shuffle=True, num_workers=2, pin_memory=True)
 
     train_classifier(device, train_loader, epochs=50)
     gc.collect()
